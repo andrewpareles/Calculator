@@ -23,7 +23,7 @@ type expr = (* just for a single expression, eg f(x)= (x^3 + 1) / 2  *)
 | Binop of binop*expr*expr (*eg: 1 + 2 *)
 | Number of num (* eg 5*)
 | Const of name (* eg g*)
-| EnvVar of name (* eg x in f(x) = x, variable in a function*)
+| Var of name (* eg x in f(x) = x, variable in a function*)
 
 
 
@@ -138,7 +138,7 @@ let rec string_of_expr (e:expr) : string =
   | Binop(op, e1, e2) -> "("^(string_of_expr e1)^(string_of_binop op)^(string_of_expr e2)^")"
   | Number(num) -> string_of_num num
   | Const(name) -> String.escaped name
-  | EnvVar(name) -> String.escaped name
+  | Var(name) -> String.escaped name
 
 
 
@@ -153,8 +153,8 @@ let rec evalExpr (e:expr) (env:env_t) : result =
     | Binop(op, e1, e2) -> evalBinop op e1 e2 env 
     | Number(num) -> num
     | Const(name) -> find_num_in_env name env
-    | EnvVar(name) when (env_has_var env name) -> find_num_in_env name env
-    | EnvVar(name) -> failwith ("Could not find variable " ^ name ^ " in environment " ^ string_of_env env ^ ".")
+    | Var(name) when (env_has_var env name) -> find_num_in_env name env
+    | Var(name) -> failwith ("Could not find variable " ^ name ^ " in environment " ^ string_of_env env ^ ".")
     | _ -> failwith "Just here to shut up about Definition, which was already matched"
     end)
 
@@ -178,3 +178,16 @@ and evalBinop (op:binop) (e1:expr) (e2:expr) (env:env_t): num =
   | MULT -> mult_nums n1 n2
   | DIV -> mult_nums n1 (one_over_num n2)
   | EXP -> exp_nums n1 n2
+
+
+
+
+(**  ------------------------ TESTING ------------------------ *)
+
+let test_expr = Definition("f", (Vars.add "x" Vars.empty), Binop(ADD, Var("x"), Const("q")) )
+let test_env = Env.add "q" (EnvNum(ReIm(3.,0.))) Env.empty
+let res = evalExpr test_expr test_env
+
+let new_env = match res with | ResultEnv e -> e | _ -> failwith "NO"
+let f = match Env.find "f" new_env with | EnvFn f -> f | _ -> failwith "NO"
+let ans = f (Env.add "x" (EnvNum(ReIm(3.,1.))) test_env )
