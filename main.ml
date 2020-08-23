@@ -9,7 +9,7 @@ type num =
 | None
 
 type binop = ADD | SUB | MULT | DIV | EXP 
-type unop = NEG
+type unop = NEG | ABS
 
 
 (* vars are the names of the variables that go into the function *)
@@ -29,7 +29,8 @@ type expr = (* just for a single expression, eg f(x)= (x^3 + 1) / 2  *)
 
 module Env = Map.Make(Name) (* env of env, eg x = 1, f(x) *)
 (* env_t is name -> num*)
-type env_var = EnvNum of num | EnvFn of (env_t -> num)
+(* vars is the vars, expr is the expr of the fn (to retain understandability) *)
+type env_var = EnvNum of num | EnvFn of vars_t*expr*(env_t -> num) 
 and env_t = env_var Env.t
 
 
@@ -44,7 +45,7 @@ let failwith str = raise (Error str)
 
 (* ------------------------ CONVERSIONS AND OPERATIONS ------------------------*)
 let to_ReIm (n:num) = 
-  match n with 
+  match n with
   | Exp(a,b) -> ReIm(a*.cos(b), a*.sin(b))
   | ReIm(a,b) -> ReIm(a,b)
   | None -> None
@@ -59,6 +60,12 @@ let negate_num (n:num) =
   match n with 
   | Exp(a,b) -> Exp(a, b+.pi/.2.)
   | ReIm(a,b) -> ReIm(-.a, -.b)
+  | None -> None
+
+let abs_num (n:num) = 
+  match n with 
+  | ReIm(a,b) -> ReIm(sqrt(a**2.+.b**2.), 0.)
+  | Exp(a,b) -> ReIm(a, 0.)
   | None -> None
 
 let add_nums (n1:num) (n2:num) : num = 
@@ -94,7 +101,7 @@ let rec exp_nums n1 n2 =
 let find_num_in_env name env : num = 
   match Env.find_opt name env with 
   | Some (EnvNum(found)) -> found
-  | Some (EnvFn(found)) -> failwith ("Constant" ^ name ^ " was found, but it was a function. Expected a number.")
+  | Some (EnvFn(_)) -> failwith ("Constant" ^ name ^ " was found, but it was a function. Expected a number.")
   | None -> failwith ("No such constant " ^ name ^ " defined.")
 
 let env_has_var env name = 
@@ -106,41 +113,50 @@ let env_has_all_vars env vars =
   Vars.for_all (fun elt -> env_has_var env elt) vars
 
 (**  ------------------------ TOSTRING FUNCTIONS ------------------------ *)
-let string_of_vars (vars:vars_t) : string = 
-  let fold_fn elt s = s ^ " " ^ (String.escaped elt)
-  in Vars.fold fold_fn vars ""
-
-let string_of_env (env:env_t) : string = 
-  Env.fold (fun k v acc -> acc^"(["^k^"])") env "" 
-
-let string_of_binop op =
-  match op with
-  | ADD -> "+"
-  | SUB -> "-"
-  | MULT -> "*"
-  | DIV -> "/"
-  | EXP -> "^"
-
-let string_of_unop op = 
-  match op with 
-  | NEG -> "-"
-
 let string_of_num num =
+  "("^(
   match num with
   | ReIm(a,b) -> (Float.to_string a) ^ "+" ^ (Float.to_string b) ^ "i"
   | Exp(a,b) -> (Float.to_string a) ^ "e^(" ^ (Float.to_string b) ^ "i)"
-  | None -> "None"
+  | None -> "None")
+  ^")"
+
+let string_of_vars (vars:vars_t) : string = 
+  let fold_fn elt s = s ^ " " ^ (String.trim elt)
+  in "("^String.trim (Vars.fold fold_fn vars "")^")"
+
+let string_of_binop op n1_str n2_str =
+  "("^n1_str^(
+    match op with
+    | ADD -> "+"
+    | SUB -> "-"
+    | MULT -> "*"
+    | DIV -> "/"
+    | EXP -> "^")
+  ^n2_str^")"
+
+let string_of_unop op num_str = 
+  match op with 
+  | NEG -> "-("^num_str^")"
+  | ABS -> "|"^num_str^"|"
 
 let rec string_of_expr (e:expr) : string = 
   match e with 
-  | Definition(name, vars, e) -> (String.escaped name)^"("^(string_of_vars vars)^")"^" = "^(string_of_expr e)
-  | Unop(op, e) -> "("^(string_of_unop op)^(string_of_expr e)^")"
-  | Binop(op, e1, e2) -> "("^(string_of_expr e1)^(string_of_binop op)^(string_of_expr e2)^")"
+  | Definition(name, vars, e) -> (String.trim name)^(string_of_vars vars)^":="^(string_of_expr e)
+  | Unop(op, e) -> string_of_unop op (string_of_expr e)
+  | Binop(op, e1, e2) -> string_of_binop op (string_of_expr e1) (string_of_expr e2)
   | Number(num) -> string_of_num num
-  | Const(name) -> String.escaped name
-  | Var(name) -> String.escaped name
+  | Const(name) -> String.trim name
+  | Var(name) -> String.trim name
 
+let string_of_envvar (envvar:env_var) : string = 
+  match envvar with
+  | EnvNum num -> string_of_num num
+  | EnvFn(vars,e,_) -> string_of_vars vars^"->"^string_of_expr e
 
+let string_of_env (env:env_t) : string = 
+  let fold_fn = (fun k v acc -> acc^"["^k^"]="^string_of_envvar v^" ") in 
+  ("<"^String.trim (Env.fold fold_fn env "")^">")
 
 (* ------------------------ EVALUATION ------------------------ *)
 
@@ -164,11 +180,13 @@ and evalExprNum e env : num =
   | ResultEnv(_) -> failwith ("Could not evaluate expression " ^ string_of_expr e ^ " to a number.")
 
 and evalDefinition (name:name) (vars:vars_t) (e:expr) (env:env_t): env_t = 
-  Env.add name (EnvFn(fun (env:env_t) -> evalExprNum e env)) env
+  Env.add name (EnvFn(vars, e, fun (env:env_t) -> evalExprNum e env)) env
 
 and evalUnop (op:unop) (e1:expr) (env:env_t) : num = 
+  let num = (evalExprNum e1 env) in 
   match op with
-  | NEG -> negate_num (evalExprNum e1 env)
+  | NEG -> negate_num num
+  | ABS -> abs_num num 
     
 and evalBinop (op:binop) (e1:expr) (e2:expr) (env:env_t): num = 
   let (n1, n2) = (evalExprNum e1 env, evalExprNum e2 env) in
@@ -180,14 +198,16 @@ and evalBinop (op:binop) (e1:expr) (e2:expr) (env:env_t): num =
   | EXP -> exp_nums n1 n2
 
 
-
-
 (**  ------------------------ TESTING ------------------------ *)
 
-let test_expr = Definition("f", (Vars.add "x" Vars.empty), Binop(ADD, Var("x"), Const("q")) )
-let test_env = Env.add "q" (EnvNum(ReIm(3.,0.))) Env.empty
+let test_expr = Definition("f", Vars.add "y" (Vars.add "x" Vars.empty), Binop(ADD, Unop(ABS, Var("x")), Const("q")) )
+let test_env = Env.add "q" (EnvNum(ReIm(3.,2.))) Env.empty
 let res = evalExpr test_expr test_env
 
 let new_env = match res with | ResultEnv e -> e | _ -> failwith "NO"
-let f = match Env.find "f" new_env with | EnvFn f -> f | _ -> failwith "NO"
+let e,f = match Env.find "f" new_env with | EnvFn (_,e,f) -> e,f | _ -> failwith "NO"
 let ans = f (Env.add "x" (EnvNum(ReIm(3.,1.))) test_env )
+
+let test_env_string = string_of_env test_env
+let test_env_string2 = string_of_env new_env
+let test_expr_string = string_of_expr test_expr
