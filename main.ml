@@ -142,7 +142,7 @@ let string_of_unop op num_str =
 
 let rec string_of_expr (e:expr) : string = 
   match e with 
-  | Definition(name, vars, e) -> (String.trim name)^(string_of_vars vars)^":="^(string_of_expr e)
+  | Definition(name, vars, e) -> (String.trim name)^(string_of_vars vars)^"="^(string_of_expr e)
   | Unop(op, e) -> string_of_unop op (string_of_expr e)
   | Binop(op, e1, e2) -> string_of_binop op (string_of_expr e1) (string_of_expr e2)
   | Number(num) -> string_of_num num
