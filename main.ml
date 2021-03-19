@@ -1,12 +1,18 @@
 module Name = String
+
 type name = Name.t
+
 
 type reIm = float * float (* A + iB *)
 type exp = float * float (* (A,B) in A e^iB *)
 type num = 
 | Exp of exp
 | ReIm of reIm
-| None
+(* | None (* shortcuts the process so no more calculations are needed*) if use, 
+rename None to NaN or something, and make it NaN of int or string so can specify the problem
+, will have to make to_reIm and to_exp return a type like an option (Some/None),
+maybe with a different name than option 
+ *)
 
 type binop = ADD | SUB | MULT | DIV | EXP 
 type unop = NEG | ABS
@@ -28,7 +34,7 @@ type expr = (* just for a single expression, eg f(x)= (x^3 + 1) / 2  *)
 
 
 module Env = Map.Make(Name) (* env of env, eg x = 1, f(x) *)
-(* env_t is name -> num*)
+(* env_t is name -> env_var *)
 (* vars is the vars, expr is the expr of the fn (to retain understandability) *)
 type env_var = EnvNum of num | EnvFn of vars_t*expr*(env_t -> num) 
 and env_t = env_var Env.t
@@ -44,62 +50,65 @@ exception Error of string
 let failwith str = raise (Error str)
 
 (* ------------------------ CONVERSIONS AND OPERATIONS ------------------------*)
-let to_ReIm (n:num) = 
+let to_reIm (n:num) : reIm = 
   match n with
-  | Exp(a,b) -> ReIm(a*.cos(b), a*.sin(b))
-  | ReIm(a,b) -> ReIm(a,b)
-  | None -> None
+  | Exp(a,b) -> (a*.cos(b), a*.sin(b))
+  | ReIm(a,b) -> (a,b)
+  (* | None -> None *)
 
-let to_Exp (n:num) = 
+let to_exp (n:num) : exp = 
   match n with 
-  | ReIm(a,b) -> Exp(sqrt(a**2.+.b**2.),atan(b/.a))
-  | Exp(a,b) -> Exp(a,b)
-  | None -> None
+  | ReIm(a,b) -> (sqrt(a**2.+.b**2.),atan(b/.a))
+  | Exp(a,b) -> (a,b)
+  (* | None -> None *)
 
 let negate_num (n:num) = 
   match n with 
   | Exp(a,b) -> Exp(a, b+.pi/.2.)
   | ReIm(a,b) -> ReIm(-.a, -.b)
-  | None -> None
+  (* | None -> None *)
 
 let abs_num (n:num) = 
   match n with 
   | ReIm(a,b) -> ReIm(sqrt(a**2.+.b**2.), 0.)
-  | Exp(a,b) -> ReIm(a, 0.)
-  | None -> None
+  | Exp(a,b) -> Exp(a, 0.)
+  (* | None -> None *)
 
 let add_nums (n1:num) (n2:num) : num = 
-  match (to_ReIm n1, to_ReIm n2) with 
-  | (ReIm(a,b), ReIm(c,d)) -> ReIm(a+.c, b+.d)
-  | _ -> failwith "Could not add numbers, since they weren't both ReIm format."
+  (* I know we don't need to wrap with ReIm, but I like it more this way *)
+  let ReIm(a,b), ReIm(c,d) = ReIm(to_reIm n1), ReIm(to_reIm n2) (* CONVERSION *)
+  in ReIm(a+.c, b+.d)
 
 let one_over_num (n:num) = 
   match n with 
   | Exp(a,b) -> Exp(1./.a, -.b)
   | ReIm(a,b) -> ReIm(a/.(a**2.+.b**2.), -.b/.(a**2.+.b**2.))
-  | None -> None
+  (* | None -> None *)
 
-let rec mult_nums (n1:num) (n2:num) = 
+let rec mult_nums (n1:num) (n2:num) : num = 
   match (n1, n2) with 
   | (Exp(a,b), Exp(c,d)) -> Exp(a*.c, b+.d)
   | (ReIm(a,b), ReIm(c,d)) -> ReIm(a*.c-.b*.d, b*.c+.a*.d)
-  | (ReIm(a,b), Exp(c,d)) | (Exp(c,d), ReIm(a,b)) -> mult_nums (ReIm(a,b)) (to_ReIm (Exp(c,d)))
-  | _ -> failwith "Expected a different type for multiplying numbers."
+  | (ReIm(a,b), Exp(c,d)) | (Exp(c,d), ReIm(a,b)) -> (
+    let n1' = ReIm(a,b) in 
+    let n2' = (ReIm(to_reIm (Exp(c,d)))) (* CONVERSION *) 
+    in mult_nums n1' n2'  
+  )
+  (* | (None, _) | (_, None) -> None *)
 
 let rec ln n1 = 
   match n1 with 
   | Exp(a,b) -> ReIm(log a, b)
-  | ReIm(a,b) -> ln (to_Exp (ReIm(a,b)))
-  | None -> None
+  | ReIm(a,b) -> ln ( Exp(to_exp (ReIm(a,b))) ) (* CONVERSION *)
+  (* | None -> None *)
 
 let rec exp_nums n1 n2 = 
-  match (to_Exp n1, to_ReIm n2) with 
-  | (Exp(a,b), ReIm(c,d)) -> Exp(a**c *. (exp 1.)**(-.(b*.d)), b*.c +. d*.(log a))
-  | (None, _) | (_, None) -> failwith "Could not exponentiate numbers."
-  | (n1, n2) -> exp_nums (to_Exp n1) (to_ReIm n2)
+  let Exp(a,b), ReIm(c,d) = Exp(to_exp n1), ReIm(to_reIm n2) (* CONVERSION *) 
+  in ( Exp(a**c *. (exp 1.)**(-.(b*.d)), b*.c +. d*.(log a)) )
+
 
 let find_num_in_env name env : num = 
-  match Env.find_opt name env with 
+  match Env.find_opt name env with (* env_var *)
   | Some (EnvNum(found)) -> found
   | Some (EnvFn(_)) -> failwith ("Constant" ^ name ^ " was found, but it was a function. Expected a number.")
   | None -> failwith ("No such constant " ^ name ^ " defined.")
@@ -118,7 +127,8 @@ let string_of_num num =
   match num with
   | ReIm(a,b) -> (Float.to_string a) ^ "+" ^ (Float.to_string b) ^ "i"
   | Exp(a,b) -> (Float.to_string a) ^ "e^(" ^ (Float.to_string b) ^ "i)"
-  | None -> "None")
+  (* | None -> "None" *)
+  )
   ^")"
 
 let string_of_vars (vars:vars_t) : string = 
@@ -200,7 +210,7 @@ and evalBinop (op:binop) (e1:expr) (e2:expr) (env:env_t): num =
 
 (**  ------------------------ TESTING ------------------------ *)
 
-let test_expr = Definition("f", Vars.add "y" (Vars.add "x" Vars.empty), Binop(ADD, Unop(ABS, Var("x")), Const("q")) )
+let test_expr = Definition("f", Vars.(empty |> add "x" |> add "y"), Binop(ADD, Unop(ABS, Var("x")), Const("q")) )
 let test_env = Env.add "q" (EnvNum(ReIm(3.,2.))) Env.empty
 let res = evalExpr test_expr test_env
 
