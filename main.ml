@@ -34,7 +34,7 @@ type expr = (* just for a single expression, eg f(x)= (x^3 + 1) / 2  *)
 module Env = Map.Make(Name) (* env of env, eg x = 1, f(x) *)
 (* env is name -> env_elt *)
 (* env_elt_names is the params, expr is the expr of the fn (to retain understandability) *)
-type env_elt = EnvNum of num | EnvFn of env_elt_names*expr*(env -> num) 
+type env_elt = EnvNum of num | EnvFn of env_elt_names*expr*(env -> num) (* could remove expr from this, it's already in env->num. for now, leave it*)
 and env = env_elt Env.t (* Env.t just means an environment from a string. env_elt tells it string -> env_elt *)
 
 
@@ -42,7 +42,10 @@ type result =
 | ResultNum of num 
 | ResultEnv of env
 
-let pi = 3.141592653589793238462643383279502884197169399375105820974944592307
+
+(* TODO: implement pi and e (and others) as actual recognized symbols *)
+let pi_num = 3.141592653589793238462643383279502884197169399375105820974944592307
+let e_num = 2.7182818284590452353602874713527
 
 exception Error of string
 let failwith str = raise (Error str)
@@ -62,7 +65,7 @@ let to_exp (n:num) : exp =
 
 let negate_num (n:num) : num = 
   match n with 
-  | Exp(a,b) -> Exp(a, b+.pi/.2.)
+  | Exp(a,b) -> Exp(a, b+.pi_num/.2.)
   | ReIm(a,b) -> ReIm(-.a, -.b)
   (* | None -> None *)
 
@@ -227,7 +230,24 @@ let res = evalExpr test_expr test_env
 let _ = print_endline (string_of_result res)
 
 let ResultEnv new_env = res
-let EnvFn (_,e,f) =  Env.find "f" new_env
+let EnvFn (_,_,f) = Env.find "f" new_env
 let ans = f (Env.add "x" (EnvNum(ReIm(3.,1.))) test_env )
 let _ = print_endline (string_of_num ans)
 
+
+
+
+
+
+
+
+let test_expr2 = Definition("g", EnvEltNames.(empty |> add "x"), Binop(EXP,Number(ReIm(e_num,0.)),  Binop(MULT,  Number(Exp(1.,pi_num/.2.)), Var("x"))))
+let _ = print_endline (string_of_expr test_expr2)
+
+let res2 = evalExpr test_expr2 Env.empty
+let _ = print_endline (string_of_result res2)
+
+let ResultEnv new_env2 = res2
+let EnvFn (_,_,g) =  Env.find "g" new_env2
+let ans2 = g (Env.add "x" (EnvNum(ReIm(12.,0.))) Env.empty )
+let _ = print_endline (string_of_num ans2)
